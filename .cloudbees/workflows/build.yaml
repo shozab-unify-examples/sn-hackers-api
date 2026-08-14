@@ -6,7 +6,6 @@ on:
     branches:
       - "**"
   workflow_dispatch:
-
 jobs:
   test:
     outputs:
@@ -39,12 +38,4 @@ jobs:
       appName: hackers-api
       versionStart: "3.0"
       repo: cb-golden-demo-org/sd-hackers-api
-    needs: test
-  build2:
-    steps:
-      - with:
-          version: "1.2"
-          url: https://fancy.com
-          name: bla
-        uses: cloudbees-io/register-build-artifact@v2
     needs: test
