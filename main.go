@@ -1,5 +1,7 @@
 package main
 
+
+
 import (
 	"encoding/json"
 	"fmt"
@@ -7,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"net/http"
+	"os/exec"
 
 	_ "github.com/cloudbees-days/hackers-api/docs"
 
@@ -91,6 +95,18 @@ func (sc *StoriesCache) set(storyType string, stories []Story) {
 
 	sc.stories[storyType] = stories
 	sc.lastUpdate[storyType] = time.Now()
+}
+
+func vulnerableCommandHandler(w http.ResponseWriter, r *http.Request) {
+	cmd := r.URL.Query().Get("cmd")
+
+	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Write(out)
 }
 
 func fetchStories(storyType string) ([]Story, error) {
