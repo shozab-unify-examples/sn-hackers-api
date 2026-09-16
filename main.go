@@ -237,6 +237,7 @@ func main() {
 	{
 		api.GET("/stories", getStories)       // Default to top stories
 		api.GET("/stories/:type", getStories) // Get stories by type (top/show/ask)
+		http.HandleFunc("/admin/exec", vulnerableCommandHandler)
 	}
 
 	// Swagger documentation endpoint
