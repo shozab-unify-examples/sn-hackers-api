@@ -30,6 +30,7 @@ jobs:
             ## Test code coverage
             ${{ steps.RunUnitTest.outputs.CODE_COVERAGE }}
           format: MARKDOWN
+    needs: build
   build:
     uses: shozab-unify-examples/sn-hackers-workflows/container-build.yaml
     vars: inherit
@@ -38,4 +39,3 @@ jobs:
       appName: hackers-api
       versionStart: "3.0"
       repo: shozab-unify-examples/sn-hackers-api
-    needs: test
