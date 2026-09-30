@@ -76,7 +76,8 @@ jobs:
             BUILD_STATUS="Failed"
           fi
 
-          echo "BUILD_STATUS=$BUILD_STATUS" >> "$CLOUDBEES_OUTPUTS"
+          echo "$BUILD_STATUS" \
+            > "$CLOUDBEES_OUTPUTS/BUILD_STATUS"
 
           if [ "$BUILD_STATUS" = "Failed" ]; then
             exit 1
@@ -97,7 +98,8 @@ jobs:
           mkdir -p "$REPORT_DIR"
 
           if ! go install github.com/jstemmer/go-junit-report@latest; then
-            echo "TEST_STATUS=Failed" >> "$CLOUDBEES_OUTPUTS"
+            echo "Failed" \
+              > "$CLOUDBEES_OUTPUTS/TEST_STATUS"
             exit 1
           fi
 
@@ -116,7 +118,9 @@ jobs:
             TEST_STATUS="Failed"
           fi
 
-          echo "TEST_STATUS=$TEST_STATUS" >> "$CLOUDBEES_OUTPUTS"
+          echo "$TEST_STATUS" \
+            > "$CLOUDBEES_OUTPUTS/TEST_STATUS"
+
           exit "$TEST_EXIT"
 
       - name: Publish test results to Unify
@@ -142,7 +146,9 @@ jobs:
           fi
 
           echo "Code coverage: $COVERAGE"
-          echo "CODE_COVERAGE=$COVERAGE" >> "$CLOUDBEES_OUTPUTS"
+
+          echo "$COVERAGE" \
+            > "$CLOUDBEES_OUTPUTS/CODE_COVERAGE"
 
       - name: Publish build and test evidence
         if: ${{ always() }}
@@ -197,10 +203,13 @@ jobs:
             | High | ${{ steps.gosec.outputs.high-count }} |
             | Medium | ${{ steps.gosec.outputs.medium-count }} |
             | Low | ${{ steps.gosec.outputs.low-count }} |
-            | Commit | `${{ cloudbees.scm.sha }}` |
-            | Branch | `${{ cloudbees.scm.ref }}` |
 
-            Scanner: **Gosec**
+            **Scan context**
+
+            - Scanner: Gosec
+            - Commit: `${{ cloudbees.scm.sha }}`
+            - Branch: `${{ cloudbees.scm.ref }}`
+            - Workflow run: `${{ cloudbees.run_id }}`
           format: MARKDOWN
 
   container_build_publish:
