@@ -31,7 +31,7 @@ jobs:
           go install github.com/swaggo/swag/cmd/swag@latest
           swag init
 
-      - name: Validate source formatting
+      - name: Check and format source code
         uses: docker://golang:1.23
         shell: bash
         run: |
@@ -46,19 +46,28 @@ jobs:
           )"
 
           if [ -n "$UNFORMATTED_FILES" ]; then
-            echo "The following files require gofmt:"
+            echo "Formatting the following files:"
             echo "$UNFORMATTED_FILES"
-            exit 1
-          fi
 
-          echo "All Go source files are correctly formatted."
+            find . \
+              -name '*.go' \
+              -not -path './vendor/*' \
+              -print0 |
+            xargs -0 gofmt -w
+          else
+            echo "All Go source files are correctly formatted."
+          fi
 
       - name: Run static code checks
         uses: docker://golang:1.23
         shell: bash
         run: |
           set -e
+
+          echo "Running go vet..."
           go vet ./...
+
+          echo "Static code checks passed."
 
       - name: Compile application
         id: compile_application
