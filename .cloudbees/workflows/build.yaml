@@ -66,13 +66,21 @@ jobs:
         uses: docker://golang:1.23
         shell: bash
         run: |
-          set -e
-
           mkdir -p dist
-          go build -o dist/hackers-api .
 
-          echo "Application compiled successfully."
-          ls -lh dist/hackers-api
+          if go build -o dist/hackers-api .; then
+            BUILD_STATUS="Passed"
+            echo "Application compiled successfully."
+            ls -lh dist/hackers-api
+          else
+            BUILD_STATUS="Failed"
+          fi
+
+          echo "BUILD_STATUS=$BUILD_STATUS" >> "$CLOUDBEES_OUTPUTS"
+
+          if [ "$BUILD_STATUS" = "Failed" ]; then
+            exit 1
+          fi
 
       - name: Run unit tests
         id: unit_tests
@@ -88,17 +96,31 @@ jobs:
 
           mkdir -p "$REPORT_DIR"
 
-          go install github.com/jstemmer/go-junit-report@latest
+          if ! go install github.com/jstemmer/go-junit-report@latest; then
+            echo "TEST_STATUS=Failed" >> "$CLOUDBEES_OUTPUTS"
+            exit 1
+          fi
+
+          TEST_EXIT=0
 
           go test \
             -coverprofile=coverage.out \
             -v ./... 2>&1 \
             | tee "$REPORT_DIR/go-test.log" \
             | go-junit-report -set-exit-code \
-              > "$REPORT_DIR/junit.xml"
+              > "$REPORT_DIR/junit.xml" || TEST_EXIT=$?
+
+          if [ "$TEST_EXIT" -eq 0 ]; then
+            TEST_STATUS="Passed"
+          else
+            TEST_STATUS="Failed"
+          fi
+
+          echo "TEST_STATUS=$TEST_STATUS" >> "$CLOUDBEES_OUTPUTS"
+          exit "$TEST_EXIT"
 
       - name: Publish test results to Unify
-        if: ${{ always() }}
+        if: ${{ always() && steps.unit_tests.outputs.TEST_STATUS != '' }}
         uses: cloudbees-io/publish-test-results@v2
         with:
           test-type: go
@@ -131,9 +153,9 @@ jobs:
 
             | Control | Result |
             |---|---|
-            | Application compilation | `${{ steps.compile_application.outcome }}` |
-            | Unit tests | `${{ steps.unit_tests.outcome }}` |
-            | Code coverage | `${{ steps.test_metrics.outputs.CODE_COVERAGE }}` |
+            | Application compilation | ${{ steps.compile_application.outputs.BUILD_STATUS }} |
+            | Unit tests | ${{ steps.unit_tests.outputs.TEST_STATUS }} |
+            | Code coverage | ${{ steps.test_metrics.outputs.CODE_COVERAGE }} |
             | Test framework | Go |
             | Commit | `${{ cloudbees.scm.sha }}` |
             | Branch | `${{ cloudbees.scm.ref }}` |
@@ -144,7 +166,7 @@ jobs:
           format: MARKDOWN
 
       - name: Enforce unit test result
-        if: ${{ steps.unit_tests.outcome == 'failure' }}
+        if: ${{ steps.unit_tests.outputs.TEST_STATUS == 'Failed' }}
         uses: docker://alpine:3.20
         shell: sh
         run: |
@@ -168,14 +190,13 @@ jobs:
           content: |-
             ## Source Security Summary
 
-            | Control | Result |
-            |---|---|
-            | Scanner execution | `${{ steps.gosec.outcome }}` |
-            | Critical findings | ${{ steps.gosec.outputs.critical-count }} |
-            | Very high findings | ${{ steps.gosec.outputs.very-high-count }} |
-            | High findings | ${{ steps.gosec.outputs.high-count }} |
-            | Medium findings | ${{ steps.gosec.outputs.medium-count }} |
-            | Low findings | ${{ steps.gosec.outputs.low-count }} |
+            | Severity | Findings |
+            |---|---:|
+            | Critical | ${{ steps.gosec.outputs.critical-count }} |
+            | Very high | ${{ steps.gosec.outputs.very-high-count }} |
+            | High | ${{ steps.gosec.outputs.high-count }} |
+            | Medium | ${{ steps.gosec.outputs.medium-count }} |
+            | Low | ${{ steps.gosec.outputs.low-count }} |
             | Commit | `${{ cloudbees.scm.sha }}` |
             | Branch | `${{ cloudbees.scm.ref }}` |
 
