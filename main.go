@@ -6,11 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
-	"net/http"
-	"os/exec"
 
 	_ "github.com/cloudbees-days/hackers-api/docs"
 
