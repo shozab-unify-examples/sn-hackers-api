@@ -1,37 +1,191 @@
 apiVersion: automation.cloudbees.io/v1alpha1
 kind: workflow
-name: build
+name: Hackers API CI
+
 on:
   push:
     branches:
       - "**"
   workflow_dispatch:
+
+permissions:
+  scm-token-own: read
+  scm-token-org: read
+  id-token: write
+
 jobs:
-  test:
+  ci:
     outputs:
-      CODE_COVERAGE: ${{ steps.RunUnitTest.outputs.CODE_COVERAGE }}
+      CODE_COVERAGE: ${{ steps.test_metrics.outputs.CODE_COVERAGE }}
+
     steps:
-      - uses: cloudbees-io/checkout@v1
-        name: Get source code
-      - name: Run unit tests
-        id: RunUnitTest
-        kind: test
+      - name: Get source code
+        uses: cloudbees-io/checkout@v1
+
+      - name: Generate Swagger documentation
         uses: docker://golang:1.23
+        shell: bash
         run: |
+          set -e
+
           go install github.com/swaggo/swag/cmd/swag@latest
           swag init
-          go test -coverprofile=coverage.out -v ./...
-          go build
-          cat coverage.out >> $CLOUDBEES_OUTPUTS/CODE_COVERAGE
-      - name: Publish evidence
+
+      - name: Validate source formatting
+        uses: docker://golang:1.23
+        shell: bash
+        run: |
+          set -e
+
+          UNFORMATTED_FILES="$(
+            find . \
+              -name '*.go' \
+              -not -path './vendor/*' \
+              -print0 |
+            xargs -0 gofmt -l
+          )"
+
+          if [ -n "$UNFORMATTED_FILES" ]; then
+            echo "The following files require gofmt:"
+            echo "$UNFORMATTED_FILES"
+            exit 1
+          fi
+
+          echo "All Go source files are correctly formatted."
+
+      - name: Run static code checks
+        uses: docker://golang:1.23
+        shell: bash
+        run: |
+          set -e
+          go vet ./...
+
+      - name: Compile application
+        id: compile_application
+        kind: build
+        uses: docker://golang:1.23
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p dist
+          go build -o dist/hackers-api .
+
+          echo "Application compiled successfully."
+          ls -lh dist/hackers-api
+
+      - name: Run unit tests
+        id: unit_tests
+        kind: test
+        continue-on-error: true
+        uses: docker://golang:1.23
+        shell: bash
+        run: |
+          set -o pipefail
+
+          export PATH="${PATH}:${GOPATH}/bin"
+          REPORT_DIR="${{ cloudbees.workspace }}/test-reports"
+
+          mkdir -p "$REPORT_DIR"
+
+          go install github.com/jstemmer/go-junit-report@latest
+
+          go test \
+            -coverprofile=coverage.out \
+            -v ./... 2>&1 \
+            | tee "$REPORT_DIR/go-test.log" \
+            | go-junit-report -set-exit-code \
+              > "$REPORT_DIR/junit.xml"
+
+      - name: Publish test results to Unify
+        if: ${{ always() }}
+        uses: cloudbees-io/publish-test-results@v2
+        with:
+          test-type: go
+          results-path: ${{ cloudbees.workspace }}/test-reports/junit.xml
+
+      - name: Calculate code coverage
+        id: test_metrics
+        if: ${{ always() }}
+        uses: docker://golang:1.23
+        shell: bash
+        run: |
+          if [ -f coverage.out ]; then
+            COVERAGE="$(
+              go tool cover -func=coverage.out |
+              awk '/^total:/ {print $3}'
+            )"
+          else
+            COVERAGE="Unavailable"
+          fi
+
+          echo "Code coverage: $COVERAGE"
+          echo "CODE_COVERAGE=$COVERAGE" >> "$CLOUDBEES_OUTPUTS"
+
+      - name: Publish build and test evidence
+        if: ${{ always() }}
         uses: cloudbees-io/publish-evidence-item@v1
         with:
           content: |-
-            ## Test code coverage
-            ${{ steps.RunUnitTest.outputs.CODE_COVERAGE }}
+            ## Build and Test Summary
+
+            | Control | Result |
+            |---|---|
+            | Application compilation | `${{ steps.compile_application.outcome }}` |
+            | Unit tests | `${{ steps.unit_tests.outcome }}` |
+            | Code coverage | `${{ steps.test_metrics.outputs.CODE_COVERAGE }}` |
+            | Test framework | Go |
+            | Commit | `${{ cloudbees.scm.sha }}` |
+            | Branch | `${{ cloudbees.scm.ref }}` |
+            | Workflow run | `${{ cloudbees.run_id }}` |
+
+            Detailed test suites, test cases, execution times, and failures are
+            available in the **Test results** view for this workflow run.
           format: MARKDOWN
-    needs: build
-  build:
+
+      - name: Enforce unit test result
+        if: ${{ steps.unit_tests.outcome == 'failure' }}
+        uses: docker://alpine:3.20
+        shell: sh
+        run: |
+          echo "Unit tests failed. Container publication is blocked."
+          exit 1
+
+  security:
+    steps:
+      - name: Get source code
+        uses: cloudbees-io/checkout@v1
+
+      - name: Scan Go source with Gosec
+        id: gosec
+        continue-on-error: true
+        uses: cloudbees-io/gosec-plugin@v1
+
+      - name: Publish security evidence
+        if: ${{ always() }}
+        uses: cloudbees-io/publish-evidence-item@v1
+        with:
+          content: |-
+            ## Source Security Summary
+
+            | Control | Result |
+            |---|---|
+            | Scanner execution | `${{ steps.gosec.outcome }}` |
+            | Critical findings | ${{ steps.gosec.outputs.critical-count }} |
+            | Very high findings | ${{ steps.gosec.outputs.very-high-count }} |
+            | High findings | ${{ steps.gosec.outputs.high-count }} |
+            | Medium findings | ${{ steps.gosec.outputs.medium-count }} |
+            | Low findings | ${{ steps.gosec.outputs.low-count }} |
+            | Commit | `${{ cloudbees.scm.sha }}` |
+            | Branch | `${{ cloudbees.scm.ref }}` |
+
+            Scanner: **Gosec**
+          format: MARKDOWN
+
+  container_build_publish:
+    needs:
+      - ci
+      - security
     uses: shozab-unify-examples/sn-hackers-workflows/container-build.yaml
     vars: inherit
     secrets: inherit
