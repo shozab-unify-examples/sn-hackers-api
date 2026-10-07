@@ -17,3 +17,11 @@ jobs:
           echo "All tests passed"
     runs-on:
       - my-label-1
+
+  ci:
+    steps:
+      - name: Get source code
+        uses: cloudbees-io/checkout@v1
+
+    runs-on:
+      - my-label-1
